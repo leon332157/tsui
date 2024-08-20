@@ -36,6 +36,8 @@ type State struct {
 	// True if the node is locked out by tailnet lock.
 	IsLockedOut bool
 
+	// State of each peer, keyed by each peer's current public key.
+	Peers []*ipnstate.PeerStatus
 	// List of exit node peers, alphabetically pre-sorted by the result of the PeerName function.
 	SortedExitNodes []*ipnstate.PeerStatus
 	// ID of the currently selected exit node or nil if none is selected.
@@ -70,6 +72,25 @@ func getSortedExitNodes(tsStatus *ipnstate.Status) []*ipnstate.PeerStatus {
 	return exitNodes
 }
 
+// Get a sorted network node list, sorted alphabetecally, similar to the desktop app
+func getSortedNetworkNodes(tsStatus *ipnstate.Status) []*ipnstate.PeerStatus {
+	networkNodes := make([]*ipnstate.PeerStatus, 0)
+
+	if tsStatus == nil {
+		return networkNodes
+	}
+
+	for _, peer := range tsStatus.Peer {
+		networkNodes = append(networkNodes, peer)
+	}
+
+	slices.SortFunc(networkNodes, func(a, b *ipnstate.PeerStatus) int {
+		return strings.Compare(PeerName(a), PeerName(b))
+	})
+
+	return networkNodes
+}
+
 // Make a current State by making necessary Tailscale API calls.
 func GetState(ctx context.Context) (State, error) {
 	status, err := Status(ctx)
@@ -94,6 +115,7 @@ func GetState(ctx context.Context) (State, error) {
 		TSVersion:       status.Version,
 		Self:            status.Self,
 		SortedExitNodes: getSortedExitNodes(status),
+		Peers:           getSortedNetworkNodes(status),
 	}
 
 	for _, peer := range status.Peer {

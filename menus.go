@@ -171,6 +171,29 @@ func (m *model) updateMenus() {
 			m.exitNodes.Submenu.SetItems(exitNodeItems)
 		}
 
+		// Update the network devices submenu.
+		{
+			networkNodes := make([]ui.SubmenuItem, 0)
+			for _, networkNode := range m.state.Peers {
+				if networkNode.Online { // add only online devices in the tailnet
+					networkNodes = append(networkNodes, &ui.LabeledSubmenuItem{
+						Label: fmt.Sprintf("%s %s", libts.PeerName(networkNode), networkNode.TailscaleIPs[0]),
+						//AdditionalLabel: fmt.Sprintf("%s %s", networkNode.OS),
+						OnActivate: func() tea.Msg {
+							err := clipboard.WriteString(networkNode.TailscaleIPs[0].String())
+							if err != nil {
+								return errorMsg(err)
+							}
+							return successMsg("Copied IP address")
+						},
+						IsDim: false,
+					})
+				}
+
+			}
+			m.networkDevices.Submenu.SetItems(networkNodes)
+		}
+
 		// Update the settings submenu.
 		{
 			exitNode := "No"
@@ -344,6 +367,7 @@ func (m *model) updateMenus() {
 		m.menu.SetItems([]*ui.AppmenuItem{
 			m.deviceInfo,
 			m.exitNodes,
+			m.networkDevices,
 			m.settings,
 		})
 	} else {

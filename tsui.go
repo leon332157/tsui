@@ -61,6 +61,7 @@ type model struct {
 	menu       ui.Appmenu
 	deviceInfo *ui.AppmenuItem
 	exitNodes  *ui.AppmenuItem
+	networkDevices *ui.AppmenuItem
 	settings   *ui.AppmenuItem
 
 	// Current width of the terminal.
@@ -92,6 +93,7 @@ func initialModel() (model, error) {
 		exitNodes: &ui.AppmenuItem{Label: "Exit Nodes",
 			Submenu: ui.Submenu{Exclusivity: ui.SubmenuExclusivityOne},
 		},
+		networkDevices: &ui.AppmenuItem{Label: "Network Devices"},
 		settings: &ui.AppmenuItem{Label: "Settings"},
 	}
 
