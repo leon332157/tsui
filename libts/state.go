@@ -36,10 +36,17 @@ type State struct {
 	// True if the node is locked out by tailnet lock.
 	IsLockedOut bool
 
-	// State of each peer, keyed by each peer's current public key.
-	Peers []*ipnstate.PeerStatus
-	// List of exit node peers, alphabetically pre-sorted by the result of the PeerName function.
-	SortedExitNodes []*ipnstate.PeerStatus
+	// Exit node peers sorted by PeerName.
+	ExitNodes []*ipnstate.PeerStatus
+	// Peers owned by the user sorted by PeerName.
+	MyNodes []*ipnstate.PeerStatus
+	// Tagged peers sorted by PeerName.
+	TaggedNodes []*ipnstate.PeerStatus
+	// Alphabetically sorted keys of AccountNodes.
+	OwnedNodeKeys []string
+	// Peers owned by other accoutns, sorted by PeerName, and keyed by account name.
+	OwnedNodes map[string][]*ipnstate.PeerStatus
+
 	// ID of the currently selected exit node or nil if none is selected.
 	CurrentExitNode *tailcfg.StableNodeID
 	// Name of the currently selected exit node or an empty string if none is selected.
@@ -51,44 +58,11 @@ type State struct {
 	TxBytes int64
 }
 
-// Get a sorted list of exit node peers, alphabetically pre-sorted by the result of the PeerName function.
-func getSortedExitNodes(tsStatus *ipnstate.Status) []*ipnstate.PeerStatus {
-	exitNodes := make([]*ipnstate.PeerStatus, 0)
-
-	if tsStatus == nil {
-		return exitNodes
-	}
-
-	for _, peer := range tsStatus.Peer {
-		if peer.ExitNodeOption {
-			exitNodes = append(exitNodes, peer)
-		}
-	}
-
-	slices.SortFunc(exitNodes, func(a, b *ipnstate.PeerStatus) int {
+// Sort a list of node statuses by PeerName.
+func sortNodes(nodes []*ipnstate.PeerStatus) {
+	slices.SortFunc(nodes, func(a, b *ipnstate.PeerStatus) int {
 		return strings.Compare(PeerName(a), PeerName(b))
 	})
-
-	return exitNodes
-}
-
-// Get a sorted network node list, sorted alphabetecally, similar to the desktop app
-func getSortedNetworkNodes(tsStatus *ipnstate.Status) []*ipnstate.PeerStatus {
-	networkNodes := make([]*ipnstate.PeerStatus, 0)
-
-	if tsStatus == nil {
-		return networkNodes
-	}
-
-	for _, peer := range tsStatus.Peer {
-		networkNodes = append(networkNodes, peer)
-	}
-
-	slices.SortFunc(networkNodes, func(a, b *ipnstate.PeerStatus) int {
-		return strings.Compare(PeerName(a), PeerName(b))
-	})
-
-	return networkNodes
 }
 
 // Create an ipn.State from the string representation.
@@ -139,19 +113,48 @@ func GetState(ctx context.Context) (State, error) {
 	}
 
 	state := State{
-		Prefs:           prefs,
-		AuthURL:         status.AuthURL,
-		BackendState:    backendState,
-		TSVersion:       status.Version,
-		Self:            status.Self,
-		SortedExitNodes: getSortedExitNodes(status),
-		Peers:           getSortedNetworkNodes(status),
+		Prefs:        prefs,
+		AuthURL:      status.AuthURL,
+		BackendState: backendState,
+		TSVersion:    status.Version,
+		Self:         status.Self,
+		OwnedNodes:   make(map[string][]*ipnstate.PeerStatus),
 	}
 
 	for _, peer := range status.Peer {
 		state.TxBytes += peer.TxBytes
 		state.RxBytes += peer.RxBytes
+
+		if peer.ExitNodeOption {
+			state.ExitNodes = append(state.ExitNodes, peer)
+		} else if peer.UserID == status.Self.UserID {
+			state.MyNodes = append(state.MyNodes, peer)
+		} else if peer.IsTagged() {
+			state.TaggedNodes = append(state.TaggedNodes, peer)
+		} else {
+			var accountName string
+			if user, ok := status.User[peer.UserID]; ok {
+				accountName = user.DisplayName
+				if accountName == "" {
+					accountName = user.LoginName
+				}
+			}
+
+			if _, ok := state.OwnedNodes[accountName]; !ok {
+				state.OwnedNodes[accountName] = make([]*ipnstate.PeerStatus, 0)
+			}
+			state.OwnedNodes[accountName] = append(state.OwnedNodes[accountName], peer)
+		}
 	}
+
+	sortNodes(state.ExitNodes)
+	sortNodes(state.MyNodes)
+	sortNodes(state.TaggedNodes)
+	for key, value := range state.OwnedNodes {
+		sortNodes(value)
+		state.OwnedNodeKeys = append(state.OwnedNodeKeys, key)
+	}
+	slices.Sort(state.OwnedNodeKeys)
 
 	versionSplitIndex := strings.IndexByte(state.TSVersion, '-')
 	if versionSplitIndex != -1 {
@@ -174,7 +177,7 @@ func GetState(ctx context.Context) (State, error) {
 	if status.ExitNodeStatus != nil {
 		state.CurrentExitNode = &status.ExitNodeStatus.ID
 
-		for _, peer := range state.SortedExitNodes {
+		for _, peer := range state.ExitNodes {
 			if peer.ID == status.ExitNodeStatus.ID {
 				state.CurrentExitNodeName = PeerName(peer)
 				break
