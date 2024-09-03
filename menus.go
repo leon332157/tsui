@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"runtime"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,9 +27,20 @@ func buildNetworkDevicesSubmenuSection(title string, peers []*ipnstate.PeerStatu
 		for _, peer := range peers {
 			peerName := libts.PeerName(peer)
 
+			// Normalize the capitalization of the OS, because some are capitalized but some aren't.
+			osName := peer.OS
+			switch osName {
+			case "android":
+				osName = "Android"
+			case "windows":
+				osName = "Windows"
+			case "linux":
+				osName = "Linux"
+			}
+
 			items = append(items, &ui.LabeledSubmenuItem{
 				Label:           peerName,
-				AdditionalLabel: strings.ToLower(peer.OS),
+				AdditionalLabel: osName,
 				OnActivate: func() tea.Msg {
 					err := clipboard.WriteString(peer.TailscaleIPs[0].String())
 					if err != nil {
@@ -224,6 +234,12 @@ func (m *model) updateMenus() {
 					buildNetworkDevicesSubmenuSection(key, m.state.OwnedNodes[key])...)
 			}
 
+			lenSum := len(m.state.MyNodes) + len(m.state.TaggedNodes)
+			for _, value := range m.state.OwnedNodes {
+				lenSum += len(value)
+			}
+
+			m.networkDevices.AdditionalLabel = fmt.Sprintf("%d visible", lenSum)
 			m.networkDevices.Submenu.SetItems(networkNodes)
 		}
 
