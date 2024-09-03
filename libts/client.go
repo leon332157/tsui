@@ -2,6 +2,7 @@ package libts
 
 import (
 	"context"
+	"runtime"
 
 	"tailscale.com/client/tailscale"
 	"tailscale.com/ipn"
@@ -16,13 +17,19 @@ func Status(ctx context.Context) (*ipnstate.Status, error) {
 	return ts.Status(ctx)
 }
 
-// Start an interactive login flow. This will automatically open the user's web browser.
-// Note that this will NOT DO ANYTHING if the session has already started; i.e. an
-// AuthURL is already populated in the state.
+// Returns true if StartLoginInteractive will (probably) open the user's web browser.
+// Can be used to decide whether to display UI elements related to interactive login.
+func StartLoginInteractiveWillOpenBrowser() bool {
+	return runtime.GOOS == "darwin"
+}
+
+// Start an interactive login flow. On macOS, this will automatically open the user's web browser.
 func StartLoginInteractive(ctx context.Context) error {
-	// Workaround for a Tailscale bug (?) where the AuthURL isn't populated when calling
-	// StartLoginInteractive the first time if the user is already logged in. For some reason,
-	// calling Start first with no options makes the AuthURL populate.
+	// Workaround for a Tailscale bug where Tailscale will go into the Starting... state
+	// without populating the AuthURL when reauthenticating. For some reason, calling
+	// Start first with no options makes the AuthURL populate.
+	//
+	// We need AuthURL so we can display UI elements related to the login process.
 	err := ts.Start(ctx, ipn.Options{})
 	if err != nil {
 		return err

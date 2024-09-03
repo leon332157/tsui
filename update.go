@@ -5,7 +5,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/neuralinkcorp/tsui/browser"
 	"github.com/neuralinkcorp/tsui/libts"
 	"github.com/neuralinkcorp/tsui/ui"
 	"github.com/neuralinkcorp/tsui/version"
@@ -54,6 +53,15 @@ func updateState() tea.Msg {
 		return errorMsg(err)
 	}
 	return stateMsg(state)
+}
+
+// Command that starts the interactive login flow.
+func startLoginInteractive() tea.Msg {
+	err := libts.StartLoginInteractive(ctx)
+	if err != nil {
+		return errorMsg(err)
+	}
+	return successMsg("Starting login flow. This may take a few seconds.")
 }
 
 // Creates a command to gets the current latency of the specified peers. Takes some time.
@@ -137,7 +145,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ".":
 			switch m.state.BackendState {
 			// If running, stop Tailscale.
-			case ipn.Running.String():
+			case ipn.Running:
 				return m, func() tea.Msg {
 					err := libts.Down(ctx)
 					if err != nil {
@@ -147,7 +155,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			// If stopped, start Tailscale.
-			case ipn.Stopped.String():
+			case ipn.Stopped:
 				return m, func() tea.Msg {
 					err := libts.Up(ctx)
 					if err != nil {
@@ -157,40 +165,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			// If we need to login...
-			case ipn.NeedsLogin.String():
-				if m.state.AuthURL == "" {
-					// If we haven't started the login flow yet, do so.
-					// Tailscale will open their browser for us.
-					return m, func() tea.Msg {
-						err := libts.StartLoginInteractive(ctx)
-						if err != nil {
-							return errorMsg(err)
-						}
-						return successMsg("Starting login flow. This may take a few seconds.")
-					}
-				} else if browser.IsSupported() {
-					// If the auth flow has already started, we need to open the browser ourselves.
-					return m, func() tea.Msg {
-						err := browser.OpenURL(m.state.AuthURL)
-						if err != nil {
-							return errorMsg(err)
-						}
-						return nil
-					}
-				}
+			case ipn.NeedsLogin:
+				return m, startLoginInteractive
 
-			case ipn.Starting.String():
+			case ipn.Starting:
 				// If we have an AuthURL in the Starting state, that means the user is reauthenticating
-				// and we also need to open the browser!
-				// (But not if we're root on Linux.)
-				if m.state.AuthURL != "" && browser.IsSupported() {
-					return m, func() tea.Msg {
-						err := browser.OpenURL(m.state.AuthURL)
-						if err != nil {
-							return errorMsg(err)
-						}
-						return nil
-					}
+				// and we want to open the browser for them (if supported).
+				if m.state.AuthURL != "" && libts.StartLoginInteractiveWillOpenBrowser() {
+					return m, startLoginInteractive
 				}
 			}
 		}
