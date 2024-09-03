@@ -383,68 +383,109 @@ type Submenu struct {
 	cursor      int
 }
 
+// A rendered submenu item and its computed layout info.
+type ComputedSubmenuItem struct {
+	text   string
+	height int
+}
+
 // Render the submenu to a fixed-height string with scrolling.
 func (submenu *Submenu) Render(isSubmenuOpen bool, height int) string {
-	// Calculate the area of the menu we're gonna render.
+	// Render all of the computedItems to strings so we can work with their computed heights.
+	computedItems := make([]ComputedSubmenuItem, len(submenu.items))
+	for i, item := range submenu.items {
+		text := item.render(i == submenu.cursor && item.isSelectable(), isSubmenuOpen)
+
+		computedItems[i] = ComputedSubmenuItem{
+			text:   text,
+			height: lipgloss.Height(text),
+		}
+	}
+
+	// Submenus can scroll, and each item can be any number of lines, so our layout engine
+	// needs to be a little bit smart.
+
+	// 1. Start with the selected item. We will always display this.
 	topOverflow := false
 	bottomOverflow := false
-	rangeStart := 0
-	rangeEnd := len(submenu.items)
+	rangeStart := submenu.cursor
+	rangeEnd := submenu.cursor + 1
+	totalHeight := computedItems[submenu.cursor].height
 
-	if height < rangeEnd {
-		if submenu.cursor < height-1 {
-			bottomOverflow = true
-			rangeEnd = height - 1
-		} else if submenu.cursor > len(submenu.items)-3 {
+	// 2. Add items backward from the selected item...
+	for i := rangeStart - 1; i >= 0; i-- {
+		// ... until an item doesn't fit. In this case, show a "..." indicator at the top instead
+		// of adding that item.
+		if totalHeight+computedItems[i].height >= height && i != 0 {
 			topOverflow = true
-			rangeStart = len(submenu.items) - height + 1
-		} else {
-			topOverflow = true
-			bottomOverflow = true
-			rangeStart = 3 + submenu.cursor - height
-			rangeEnd = rangeStart + height - 2
+			totalHeight++
+			break
 		}
+
+		rangeStart = i
+		totalHeight += computedItems[i].height
 	}
 
-	// Clamp the range so we NEVER crash.
+	// 3. Add items forward from the selected item...
+	for i := rangeEnd; i < len(computedItems); i++ {
+		// ... until an item doesn't fit. In this case, show a "..." indicator at the bottom
+		// instead of adding that item.
+		if totalHeight+computedItems[i].height >= height && i != len(computedItems)-1 {
+			bottomOverflow = true
+			totalHeight++
+			break
+		}
+
+		rangeEnd = i + 1
+		totalHeight += computedItems[i].height
+	}
+
+	// 4. Make sure everything fits after adding the overflow indicators by popping
+	//    items from the start until we no longer exceed the height.
+	for totalHeight > height {
+		if !topOverflow {
+			topOverflow = true
+			totalHeight++
+		}
+
+		totalHeight -= computedItems[rangeStart].height
+		rangeStart++
+	}
+
+	// 5. Clamp the range so we can NEVER crash.
 	rangeStart = max(0, rangeStart)
-	rangeEnd = max(rangeStart, min(rangeEnd, len(submenu.items)))
+	rangeEnd = max(rangeStart, min(rangeEnd, len(computedItems)))
 
-	// Render it.
-	var inner strings.Builder
-
-	for i, item := range submenu.items[rangeStart:rangeEnd] {
-		if i > 0 {
-			inner.WriteByte('\n')
-		}
-		itemPos := rangeStart + i
-		inner.WriteString(item.render(itemPos == submenu.cursor && item.isSelectable(), isSubmenuOpen))
-	}
-
-	// Do an aligned-bottom crop to compensate for multiline items.
-	nonOverflowHeight := height
-	if topOverflow {
-		nonOverflowHeight--
-	}
-	if bottomOverflow {
-		nonOverflowHeight--
-	}
-
-	lines := strings.Split(inner.String(), "\n")
-	startLine := min(len(lines), max(0, len(lines)-nonOverflowHeight))
-	lines = lines[startLine:]
-
-	// And add the overflow indicators.
+	// Now we have a range of all menu items that can fit on screen, and we can create the
+	// final string.
 	overflow := lipgloss.NewStyle().
 		Background(DarkGray).
 		MarginLeft(2).
 		Render("...")
 
 	var s strings.Builder
+
+	// Add the top overflow indicator.
 	if topOverflow {
 		s.WriteString(overflow + "\n")
+
+		// If we have a top overflow indicator but aren't using the whole height of the screen,
+		// one of the items was oddly sized. Add some padding underneath the overflow indicator
+		// to keep all of the other items aligned to the bottom.
+		for i := 0; i < height-totalHeight; i++ {
+			s.WriteByte('\n')
+		}
 	}
-	s.WriteString(strings.Join(lines, "\n"))
+
+	// Add the rendered items.
+	for i, item := range computedItems[rangeStart:rangeEnd] {
+		if i != 0 {
+			s.WriteByte('\n')
+		}
+		s.WriteString(item.text)
+	}
+
+	// Add the bottom overflow indicator.
 	if bottomOverflow {
 		s.WriteString("\n" + overflow)
 	}
